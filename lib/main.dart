@@ -43,6 +43,8 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   late Animation<double> _animation;
   List<int> _clearingLines = [];
   late Timer _fastDropTimer;
+  late Timer _leftMoveTimer;
+  late Timer _rightMoveTimer;
   late double gameSpeed;
   late int speedLevel;
 
@@ -70,6 +72,8 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
       }
     });
     _fastDropTimer = Timer(Duration.zero, () {});
+    _leftMoveTimer = Timer(Duration.zero, () {});
+    _rightMoveTimer = Timer(Duration.zero, () {});
   }
 
   void startGameLoop() async {
@@ -155,6 +159,42 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     // 停止快速下落
     if (_fastDropTimer.isActive) {
       _fastDropTimer.cancel();
+    }
+  }
+
+  void _startLeftMove() {
+    // 开始快速左移，每50毫秒移动一次
+    _leftMoveTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+      if (gameStarted && !gameOver) {
+        moveLeft();
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  void _stopLeftMove() {
+    // 停止快速左移
+    if (_leftMoveTimer.isActive) {
+      _leftMoveTimer.cancel();
+    }
+  }
+
+  void _startRightMove() {
+    // 开始快速右移，每50毫秒移动一次
+    _rightMoveTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+      if (gameStarted && !gameOver) {
+        moveRight();
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  void _stopRightMove() {
+    // 停止快速右移
+    if (_rightMoveTimer.isActive) {
+      _rightMoveTimer.cancel();
     }
   }
 
@@ -325,7 +365,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     double boardWidth = screenWidth * 0.6;
     double cellSize = boardWidth / cols;
     double boardHeight = cellSize * rows;
-    double controlButtonSize = screenWidth * 0.15;
+    double controlButtonSize = screenWidth * 0.18;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -512,7 +552,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                   color: Colors.grey[700],
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                                child: const Text('Speed Level', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
+                                child: const Text('Level', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
                               ),
                               const SizedBox(height: 10),
                               Container(
@@ -565,6 +605,14 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                   children: [
                                     GestureDetector(
                                       onTap: moveLeft,
+                                      onLongPress: () {
+                                        // 长按快速左移
+                                        _startLeftMove();
+                                      },
+                                      onLongPressEnd: (details) {
+                                        // 结束长按
+                                        _stopLeftMove();
+                                      },
                                       child: Container(
                                         width: controlButtonSize,
                                         height: controlButtonSize,
@@ -591,6 +639,14 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                     const SizedBox(width: 8),
                                     GestureDetector(
                                       onTap: moveRight,
+                                      onLongPress: () {
+                                        // 长按快速右移
+                                        _startRightMove();
+                                      },
+                                      onLongPressEnd: (details) {
+                                        // 结束长按
+                                        _stopRightMove();
+                                      },
                                       child: Container(
                                         width: controlButtonSize,
                                         height: controlButtonSize,
@@ -655,7 +711,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                             ),
                           ),
                           
-                          const SizedBox(width: 60),
+                          const SizedBox(width: 40),
                           
                           // A button for rotate (圆形按钮)
                           Container(
