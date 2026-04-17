@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:math' as math;
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 void main() {
   runApp(const TetrisApp());
@@ -74,6 +76,30 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     _fastDropTimer = Timer(Duration.zero, () {});
     _leftMoveTimer = Timer(Duration.zero, () {});
     _rightMoveTimer = Timer(Duration.zero, () {});
+    
+    // 添加键盘事件监听
+    RawKeyboard.instance.addListener(_handleKeyEvent);
+  }
+
+  void _handleKeyEvent(RawKeyEvent event) {
+    if (!gameStarted || gameOver) return;
+    
+    if (event is RawKeyDownEvent) {
+      switch (event.logicalKey) {
+        case LogicalKeyboardKey.keyA:
+          moveLeft();
+          break;
+        case LogicalKeyboardKey.keyD:
+          moveRight();
+          break;
+        case LogicalKeyboardKey.keyS:
+          moveDown();
+          break;
+        case LogicalKeyboardKey.keyW:
+          rotate();
+          break;
+      }
+    }
   }
 
   void startGameLoop() async {
@@ -145,8 +171,8 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   }
 
   void _startFastDrop() {
-    // 开始快速下落，每50毫秒移动一次
-    _fastDropTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+    // 开始快速下落，每100毫秒移动一次
+    _fastDropTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
       if (gameStarted && !gameOver) {
         moveDown();
       } else {
@@ -163,8 +189,8 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   }
 
   void _startLeftMove() {
-    // 开始快速左移，每50毫秒移动一次
-    _leftMoveTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+    // 开始快速左移，每100毫秒移动一次
+    _leftMoveTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
       if (gameStarted && !gameOver) {
         moveLeft();
       } else {
@@ -181,8 +207,8 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   }
 
   void _startRightMove() {
-    // 开始快速右移，每50毫秒移动一次
-    _rightMoveTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+    // 开始快速右移，每100毫秒移动一次
+    _rightMoveTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
       if (gameStarted && !gameOver) {
         moveRight();
       } else {
@@ -362,9 +388,38 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     double screenWidth = MediaQuery.of(context).size.width;
     double screenHeight = MediaQuery.of(context).size.height;
-    double boardWidth = screenWidth * 0.6;
+    
+    // 计算游戏内容最大高度，确保不超出屏幕
+    // 桌面端使用更大的高度，接近屏幕高度
+    double maxGameHeight = MediaQuery.of(context).size.width >= 600 
+        ? screenHeight - 50 // 桌面端只减去少量边距
+        : screenHeight - 100; // 移动端减去更多边距
+    
+    // 计算游戏板尺寸，保持2:1的高宽比
+    // 桌面端使用更大的比例
+    double boardWidth = MediaQuery.of(context).size.width >= 600 
+        ? screenWidth * 0.8 
+        : screenWidth * 0.6;
+    
+    // 确保boardWidth为正数
+    boardWidth = boardWidth.clamp(100.0, screenWidth);
+    
     double cellSize = boardWidth / cols;
     double boardHeight = cellSize * rows;
+    
+    // 确保游戏板高度不超出最大游戏高度
+    if (boardHeight > maxGameHeight * 0.8) {
+      boardHeight = maxGameHeight * 0.8;
+      // 确保boardHeight为正数
+      boardHeight = boardHeight.clamp(200.0, maxGameHeight);
+      boardWidth = boardHeight / 2;
+      cellSize = boardWidth / cols;
+    }
+    
+    // 再次确保boardWidth为正数
+    boardWidth = boardWidth.clamp(100.0, screenWidth);
+    
+    // 计算按钮大小，根据屏幕宽度自适应
     double controlButtonSize = screenWidth * 0.18;
 
     return Scaffold(
@@ -399,9 +454,9 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 5),
                     const Text('Tetris', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 5),
                     
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -493,7 +548,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                         // Sidebar
                         const SizedBox(width: 10),
                         Container(
-                          width: 120,
+                          width: MediaQuery.of(context).size.width >= 600 ? 170 : 120,
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
                             border: Border.all(color: Colors.grey[600]!, width: 1),
@@ -537,13 +592,17 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                               ),
                               const SizedBox(height: 10),
                               Container(
+                                width: MediaQuery.of(context).size.width >= 600 ? 150 : 120,
                                 padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 15),
                                 decoration: BoxDecoration(
                                   color: Colors.grey[900],
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(color: Colors.grey[600]!, width: 1),
                                 ),
-                                child: Text('$score', style: const TextStyle(fontSize: 20, color: Colors.white, fontWeight: FontWeight.bold)),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text('$score', style: const TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
+                                ),
                               ),
                               const SizedBox(height: 20),
                               Container(
@@ -570,10 +629,11 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                       ],
                     ),
                     
-                    const SizedBox(height: 40),
+                    // 减小间距，特别是桌面端
+                    const SizedBox(height: 20),
                     
-                    // Game controls
-                    Container(
+                    // Game controls - only show on mobile devices (including mobile browsers)
+                    if (MediaQuery.of(context).size.width < 600) Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
                         border: Border.all(color: Colors.grey[600]!, width: 1),
@@ -780,7 +840,11 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Text('Welcome to Tetris!', style: TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 60),
+                    const SizedBox(height: 20),
+                    MediaQuery.of(context).size.width >= 600 
+                      ? const Text('Use WASD to control', style: TextStyle(fontSize: 18, color: Colors.white)) 
+                      : const Text('Use on-screen buttons to control', style: TextStyle(fontSize: 18, color: Colors.white)),
+                    const SizedBox(height: 40),
                     ElevatedButton(
                       onPressed: startGame,
                       style: ElevatedButton.styleFrom(
@@ -834,6 +898,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   @override
   void dispose() {
     _controller.dispose();
+    RawKeyboard.instance.removeListener(_handleKeyEvent);
     super.dispose();
   }
 }
