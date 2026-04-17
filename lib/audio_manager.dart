@@ -40,11 +40,25 @@ class AudioManager {
   }
 
   Future<void> playClearLine() async {
+    await playClearLineWithCount(1);
+  }
+
+  Future<void> playClearLineWithCount(int lineCount) async {
     if (!isSfxEnabled) return;
     try {
-      await _sfxPlayer.play(AssetSource('audio/clear_line.wav'));
+      await _bgmPlayer.setVolume(0.2);
+      if (lineCount == 1) {
+        await _sfxPlayer.setVolume(0.15);
+        await _sfxPlayer.play(AssetSource('audio/clear_line_single.wav'));
+      } else {
+        await _sfxPlayer.setVolume(0.2);
+        await _sfxPlayer.play(AssetSource('audio/clear_line_multi.wav'));
+      }
+      await Future.delayed(Duration(milliseconds: lineCount == 1 ? 800 : 1200));
+      await _bgmPlayer.setVolume(0.5);
+      await _sfxPlayer.setVolume(0.7);
     } catch (e) {
-      // SFX file not found
+      await _bgmPlayer.setVolume(0.5);
     }
   }
 
@@ -76,16 +90,14 @@ class AudioManager {
   }
 
   void toggleMusic() {
-    isMusicEnabled = !isMusicEnabled;
     if (isMusicEnabled) {
-      resumeBgm();
-    } else {
       pauseBgm();
+    } else {
+      resumeBgm();
     }
   }
 
   void toggleSfx() {
-    isSfxEnabled = !isSfxEnabled;
   }
 
   Future<void> dispose() async {

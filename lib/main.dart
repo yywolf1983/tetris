@@ -359,7 +359,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
           checkAndUpdateSpeed();
 
           // 播放消除音效
-          _audioManager.playClearLine();
+          _audioManager.playClearLineWithCount(linesCleared);
         });
       });
     }
@@ -445,9 +445,9 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: TextStyle(fontSize: 10, color: Colors.white.withOpacity(0.7))),
-        const SizedBox(height: 2),
-        Text(value, style: TextStyle(fontSize: 16, color: valueColor, fontWeight: FontWeight.bold)),
+        Text(label, style: TextStyle(fontSize: 8, color: Colors.white.withOpacity(0.7))),
+        const SizedBox(height: 1),
+        Text(value, style: TextStyle(fontSize: 12, color: valueColor, fontWeight: FontWeight.bold)),
       ],
     );
   }
@@ -466,15 +466,15 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
             });
           },
           child: Container(
-            padding: const EdgeInsets.all(6),
+            padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
               color: _isMusicEnabled ? Colors.blue : Colors.grey[700],
               shape: BoxShape.circle,
             ),
-            child: const Text('♪', style: TextStyle(fontSize: 14, color: Colors.white)),
+            child: const Text('♪', style: TextStyle(fontSize: 10, color: Colors.white)),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 5),
         GestureDetector(
           onTap: () {
             setState(() {
@@ -485,12 +485,12 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
             });
           },
           child: Container(
-            padding: const EdgeInsets.all(6),
+            padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
               color: _isSfxEnabled ? Colors.green : Colors.grey[700],
               shape: BoxShape.circle,
             ),
-            child: const Text('♫', style: TextStyle(fontSize: 14, color: Colors.white)),
+            child: const Text('♫', style: TextStyle(fontSize: 10, color: Colors.white)),
           ),
         ),
       ],
@@ -567,30 +567,30 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const SizedBox(height: 5),
-                    const Text('Tetris', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 2)),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
 
                     // Header bar with game stats
                     Container(
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 20),
+                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 15),
                       decoration: BoxDecoration(
                         color: Colors.black.withOpacity(0.3),
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: BorderRadius.circular(14),
                         border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          const Text('Tetris', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1)),
+                          Container(width: 1, height: 16, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 12)),
                           _buildStatItem('Best', '$highScore', Colors.yellow),
-                          Container(width: 1, height: 20, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 15)),
+                          Container(width: 1, height: 16, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 12)),
                           _buildStatItem('Level', '$speedLevel', Colors.cyan),
-                          Container(width: 1, height: 20, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 15)),
+                          Container(width: 1, height: 16, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 12)),
                           _buildSoundButton(),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
 
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
