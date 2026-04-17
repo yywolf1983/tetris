@@ -604,109 +604,124 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                 Row(
                                   children: [
                                     GestureDetector(
-                                      onTap: moveLeft,
-                                      onLongPress: () {
-                                        // 长按快速左移
-                                        _startLeftMove();
-                                      },
-                                      onLongPressEnd: (details) {
-                                        // 结束长按
-                                        _stopLeftMove();
-                                      },
-                                      child: Container(
-                                        width: controlButtonSize,
-                                        height: controlButtonSize,
-                                        decoration: BoxDecoration(
-                                          color: Colors.grey[700],
-                                          border: Border.all(color: Colors.grey[500]!, width: 1),
-                                          borderRadius: BorderRadius.circular(8),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black.withOpacity(0.3),
-                                              offset: const Offset(2, 2),
-                                              blurRadius: 2,
+                                              onTapDown: (details) {
+                                                // 立即移动一次
+                                                moveLeft();
+                                                // 开始快速左移
+                                                _startLeftMove();
+                                              },
+                                              onTapUp: (details) {
+                                                // 结束长按
+                                                _stopLeftMove();
+                                              },
+                                              onTapCancel: () {
+                                                // 结束长按
+                                                _stopLeftMove();
+                                              },
+                                              child: Container(
+                                                width: controlButtonSize,
+                                                height: controlButtonSize,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.grey[700],
+                                                  border: Border.all(color: Colors.grey[500]!, width: 1),
+                                                  borderRadius: BorderRadius.circular(8),
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: Colors.black.withOpacity(0.3),
+                                                      offset: const Offset(2, 2),
+                                                      blurRadius: 2,
+                                                    ),
+                                                    BoxShadow(
+                                                      color: Colors.white.withOpacity(0.1),
+                                                      offset: const Offset(-1, -1),
+                                                      blurRadius: 1,
+                                                    ),
+                                                  ],
+                                                ),
+                                                child: const Center(child: Text('←', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold))),
+                                              ),
                                             ),
-                                            BoxShadow(
-                                              color: Colors.white.withOpacity(0.1),
-                                              offset: const Offset(-1, -1),
-                                              blurRadius: 1,
+                                            const SizedBox(width: 8),
+                                            GestureDetector(
+                                              onTapDown: (details) {
+                                                // 立即移动一次
+                                                moveRight();
+                                                // 开始快速右移
+                                                _startRightMove();
+                                              },
+                                              onTapUp: (details) {
+                                                // 结束长按
+                                                _stopRightMove();
+                                              },
+                                              onTapCancel: () {
+                                                // 结束长按
+                                                _stopRightMove();
+                                              },
+                                              child: Container(
+                                                width: controlButtonSize,
+                                                height: controlButtonSize,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.grey[700],
+                                                  border: Border.all(color: Colors.grey[500]!, width: 1),
+                                                  borderRadius: BorderRadius.circular(8),
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: Colors.black.withOpacity(0.3),
+                                                      offset: const Offset(2, 2),
+                                                      blurRadius: 2,
+                                                    ),
+                                                    BoxShadow(
+                                                      color: Colors.white.withOpacity(0.1),
+                                                      offset: const Offset(-1, -1),
+                                                      blurRadius: 1,
+                                                    ),
+                                                  ],
+                                                ),
+                                                child: const Center(child: Text('→', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold))),
+                                              ),
                                             ),
-                                          ],
-                                        ),
-                                        child: const Center(child: Text('←', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold))),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    GestureDetector(
-                                      onTap: moveRight,
-                                      onLongPress: () {
-                                        // 长按快速右移
-                                        _startRightMove();
-                                      },
-                                      onLongPressEnd: (details) {
-                                        // 结束长按
-                                        _stopRightMove();
-                                      },
-                                      child: Container(
-                                        width: controlButtonSize,
-                                        height: controlButtonSize,
-                                        decoration: BoxDecoration(
-                                          color: Colors.grey[700],
-                                          border: Border.all(color: Colors.grey[500]!, width: 1),
-                                          borderRadius: BorderRadius.circular(8),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black.withOpacity(0.3),
-                                              offset: const Offset(2, 2),
-                                              blurRadius: 2,
-                                            ),
-                                            BoxShadow(
-                                              color: Colors.white.withOpacity(0.1),
-                                              offset: const Offset(-1, -1),
-                                              blurRadius: 1,
-                                            ),
-                                          ],
-                                        ),
-                                        child: const Center(child: Text('→', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold))),
-                                      ),
-                                    ),
                                   ],
                                 ),
                                 const SizedBox(height: 8),
                                 // 向下按钮
                                 GestureDetector(
-                                  onTap: moveDown,
-                                  onLongPress: () {
-                                    // 长按快速下落
-                                    _startFastDrop();
-                                  },
-                                  onLongPressEnd: (details) {
-                                    // 结束长按
-                                    _stopFastDrop();
-                                  },
-                                  child: Container(
-                                    width: controlButtonSize * 2 + 8,
-                                    height: controlButtonSize,
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey[700],
-                                      border: Border.all(color: Colors.grey[500]!, width: 1),
-                                      borderRadius: BorderRadius.circular(8),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withOpacity(0.3),
-                                          offset: const Offset(2, 2),
-                                          blurRadius: 2,
+                                          onTapDown: (details) {
+                                            // 立即移动一次
+                                            moveDown();
+                                            // 开始快速下落
+                                            _startFastDrop();
+                                          },
+                                          onTapUp: (details) {
+                                            // 结束长按
+                                            _stopFastDrop();
+                                          },
+                                          onTapCancel: () {
+                                            // 结束长按
+                                            _stopFastDrop();
+                                          },
+                                          child: Container(
+                                            width: controlButtonSize * 2 + 8,
+                                            height: controlButtonSize,
+                                            decoration: BoxDecoration(
+                                              color: Colors.grey[700],
+                                              border: Border.all(color: Colors.grey[500]!, width: 1),
+                                              borderRadius: BorderRadius.circular(8),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black.withOpacity(0.3),
+                                                  offset: const Offset(2, 2),
+                                                  blurRadius: 2,
+                                                ),
+                                                BoxShadow(
+                                                  color: Colors.white.withOpacity(0.1),
+                                                  offset: const Offset(-1, -1),
+                                                  blurRadius: 1,
+                                                ),
+                                              ],
+                                            ),
+                                            child: const Center(child: Text('↓', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold))),
+                                          ),
                                         ),
-                                        BoxShadow(
-                                          color: Colors.white.withOpacity(0.1),
-                                          offset: const Offset(-1, -1),
-                                          blurRadius: 1,
-                                        ),
-                                      ],
-                                    ),
-                                    child: const Center(child: Text('↓', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold))),
-                                  ),
-                                ),
                               ],
                             ),
                           ),
