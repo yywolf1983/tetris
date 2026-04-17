@@ -430,10 +430,10 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                         });
                                         startGameLoop();
                                       },
-                                      child: const Text('Start Game', style: TextStyle(fontSize: 20)),
                                       style: ElevatedButton.styleFrom(
                                         padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
                                       ),
+                                      child: const Text('Start Game', style: TextStyle(fontSize: 20)),
                                     ),
                                   ],
                                 ),
@@ -456,10 +456,10 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                     const SizedBox(height: 40),
                                     ElevatedButton(
                                       onPressed: newGame,
-                                      child: const Text('New Game', style: TextStyle(fontSize: 20)),
                                       style: ElevatedButton.styleFrom(
                                         padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
                                       ),
+                                      child: const Text('New Game', style: TextStyle(fontSize: 20)),
                                     ),
                                   ],
                                 ),
@@ -509,7 +509,6 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                         ),
                                         child: ElevatedButton(
                                           onPressed: moveLeft,
-                                          child: const Text('←', style: TextStyle(color: Colors.white, fontSize: 18)),
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.transparent,
                                             foregroundColor: Colors.white,
@@ -521,6 +520,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                               ),
                                             ),
                                           ),
+                                          child: const Text('←', style: TextStyle(color: Colors.white, fontSize: 18)),
                                         ),
                                       ),
                                       // Right button
@@ -537,7 +537,6 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                         ),
                                         child: ElevatedButton(
                                           onPressed: moveRight,
-                                          child: const Text('→', style: TextStyle(color: Colors.white, fontSize: 18)),
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.transparent,
                                             foregroundColor: Colors.white,
@@ -549,6 +548,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                               ),
                                             ),
                                           ),
+                                          child: const Text('→', style: TextStyle(color: Colors.white, fontSize: 18)),
                                         ),
                                       ),
                                     ],
@@ -567,7 +567,6 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                     ),
                                     child: ElevatedButton(
                                       onPressed: moveDown,
-                                      child: const Text('↓', style: TextStyle(color: Colors.white, fontSize: 18)),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.transparent,
                                         foregroundColor: Colors.white,
@@ -579,6 +578,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                           ),
                                         ),
                                       ),
+                                      child: const Text('↓', style: TextStyle(color: Colors.white, fontSize: 18)),
                                     ),
                                   ),
                                 ],
@@ -619,7 +619,6 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                     ),
                                     child: ElevatedButton(
                                       onPressed: rotate,
-                                      child: const Text('A', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.transparent,
                                         foregroundColor: Colors.white,
@@ -628,6 +627,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                           borderRadius: BorderRadius.circular(35),
                                         ),
                                       ),
+                                      child: const Text('A', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
                                     ),
                                   ),
                                 ],

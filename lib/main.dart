@@ -5,6 +5,8 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'audio_manager.dart';
 
 void main() {
   runApp(const TetrisApp());
@@ -35,10 +37,14 @@ class TetrisGame extends StatefulWidget {
 class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateMixin {
   static const int rows = 20;
   static const int cols = 10;
+  static const String highScoreKey = 'tetris_high_score';
+  static const String musicEnabledKey = 'tetris_music_enabled';
+  static const String sfxEnabledKey = 'tetris_sfx_enabled';
   late List<List<int>> board;
   late Tetromino currentPiece;
   late Tetromino nextPiece;
   late int score;
+  late int highScore;
   bool gameOver = false;
   bool gameStarted = false;
   late AnimationController _controller;
@@ -49,6 +55,9 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   late Timer _rightMoveTimer;
   late double gameSpeed;
   late int speedLevel;
+  late AudioManager _audioManager;
+  late bool _isMusicEnabled;
+  late bool _isSfxEnabled;
 
   @override
   void initState() {
@@ -57,8 +66,12 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     currentPiece = Tetromino.random();
     nextPiece = Tetromino.random();
     score = 0;
+    highScore = 0;
     gameSpeed = 500.0;
     speedLevel = 0;
+    _isMusicEnabled = true;
+    _isSfxEnabled = true;
+    _audioManager = AudioManager();
     _controller = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
@@ -77,8 +90,39 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     _leftMoveTimer = Timer(Duration.zero, () {});
     _rightMoveTimer = Timer(Duration.zero, () {});
     
+    _loadHighScore();
+    _loadAudioSettings();
+    
     // 添加键盘事件监听
     RawKeyboard.instance.addListener(_handleKeyEvent);
+  }
+
+  Future<void> _loadAudioSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _isMusicEnabled = prefs.getBool(musicEnabledKey) ?? true;
+      _isSfxEnabled = prefs.getBool(sfxEnabledKey) ?? true;
+      _audioManager.isMusicEnabled = _isMusicEnabled;
+      _audioManager.isSfxEnabled = _isSfxEnabled;
+    });
+  }
+
+  Future<void> _saveAudioSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(musicEnabledKey, _isMusicEnabled);
+    await prefs.setBool(sfxEnabledKey, _isSfxEnabled);
+  }
+
+  Future<void> _loadHighScore() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      highScore = prefs.getInt(highScoreKey) ?? 0;
+    });
+  }
+
+  Future<void> _saveHighScore() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(highScoreKey, highScore);
   }
 
   void _handleKeyEvent(RawKeyEvent event) {
@@ -122,6 +166,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
       speedLevel = 0;
       gameOver = false;
     });
+    _audioManager.playBgm();
     startGameLoop();
   }
 
@@ -130,6 +175,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
       setState(() {
         currentPiece.x--;
       });
+      _audioManager.playMove();
     }
   }
 
@@ -138,6 +184,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
       setState(() {
         currentPiece.x++;
       });
+      _audioManager.playMove();
     }
   }
 
@@ -155,6 +202,12 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
         setState(() {
           gameOver = true;
         });
+        _audioManager.playGameOver();
+        _audioManager.stopBgm();
+        if (score > highScore) {
+          highScore = score;
+          _saveHighScore();
+        }
       }
     }
   }
@@ -166,6 +219,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
         setState(() {
           currentPiece.shape = rotatedShape;
         });
+        _audioManager.playRotate();
       }
     }
   }
@@ -298,11 +352,14 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
           
           // 更新分数
           score += linesCleared * 100;
-          
+
           _clearingLines.clear();
-          
+
           // 检查是否需要加速
           checkAndUpdateSpeed();
+
+          // 播放消除音效
+          _audioManager.playClearLine();
         });
       });
     }
@@ -384,6 +441,62 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     );
   }
 
+  Widget _buildStatItem(String label, String value, Color valueColor) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: TextStyle(fontSize: 10, color: Colors.white.withOpacity(0.7))),
+        const SizedBox(height: 2),
+        Text(value, style: TextStyle(fontSize: 16, color: valueColor, fontWeight: FontWeight.bold)),
+      ],
+    );
+  }
+
+  Widget _buildSoundButton() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _isMusicEnabled = !_isMusicEnabled;
+              _audioManager.isMusicEnabled = _isMusicEnabled;
+              _audioManager.toggleMusic();
+              _saveAudioSettings();
+            });
+          },
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: _isMusicEnabled ? Colors.blue : Colors.grey[700],
+              shape: BoxShape.circle,
+            ),
+            child: const Text('♪', style: TextStyle(fontSize: 14, color: Colors.white)),
+          ),
+        ),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _isSfxEnabled = !_isSfxEnabled;
+              _audioManager.isSfxEnabled = _isSfxEnabled;
+              _audioManager.toggleSfx();
+              _saveAudioSettings();
+            });
+          },
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: _isSfxEnabled ? Colors.green : Colors.grey[700],
+              shape: BoxShape.circle,
+            ),
+            child: const Text('♫', style: TextStyle(fontSize: 14, color: Colors.white)),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     double screenWidth = MediaQuery.of(context).size.width;
@@ -455,9 +568,30 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const SizedBox(height: 5),
-                    const Text('Tetris', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-                    const SizedBox(height: 5),
-                    
+                    const Text('Tetris', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 2)),
+                    const SizedBox(height: 10),
+
+                    // Header bar with game stats
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 20),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildStatItem('Best', '$highScore', Colors.yellow),
+                          Container(width: 1, height: 20, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 15)),
+                          _buildStatItem('Level', '$speedLevel', Colors.cyan),
+                          Container(width: 1, height: 20, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 15)),
+                          _buildSoundButton(),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -603,25 +737,6 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                   fit: BoxFit.scaleDown,
                                   child: Text('$score', style: const TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
                                 ),
-                              ),
-                              const SizedBox(height: 20),
-                              Container(
-                                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[700],
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: const Text('Level', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
-                              ),
-                              const SizedBox(height: 10),
-                              Container(
-                                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 15),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[900],
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.grey[600]!, width: 1),
-                                ),
-                                child: Text('$speedLevel', style: const TextStyle(fontSize: 20, color: Colors.white, fontWeight: FontWeight.bold)),
                               ),
                             ],
                           ),
@@ -873,6 +988,8 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                     const Text('Game Over!', style: TextStyle(fontSize: 36, color: Colors.red, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 20),
                     Text('Score: $score', style: const TextStyle(fontSize: 24, color: Colors.white)),
+                    const SizedBox(height: 10),
+                    Text('Best: $highScore', style: const TextStyle(fontSize: 20, color: Colors.yellow)),
                     const SizedBox(height: 60),
                     ElevatedButton(
                       onPressed: startGame,

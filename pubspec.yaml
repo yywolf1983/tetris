@@ -10,6 +10,8 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  shared_preferences: ^2.2.2
+  audioplayers: ^6.1.0
 
 dev_dependencies:
   flutter_test:
@@ -18,5 +20,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/audio/
 
 
