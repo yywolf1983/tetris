@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'audio_manager.dart';
+import 'tetromino.dart';
 
 void main() {
   runApp(const TetrisApp());
@@ -47,12 +48,16 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   late int highScore;
   bool gameOver = false;
   bool gameStarted = false;
+  bool gamePaused = false;
   late AnimationController _controller;
   late Animation<double> _animation;
+  late AnimationController _flashController;
+  late Animation<double> _flashAnimation;
   List<int> _clearingLines = [];
   late Timer _fastDropTimer;
   late Timer _leftMoveTimer;
   late Timer _rightMoveTimer;
+  late Timer _gameLoopTimer;
   late double gameSpeed;
   late int speedLevel;
   late AudioManager _audioManager;
@@ -73,10 +78,12 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     _isSfxEnabled = true;
     _audioManager = AudioManager();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 600),
       vsync: this,
     );
-    _animation = Tween<double>(begin: 1.0, end: 1.2).animate(_controller);
+    _animation = Tween<double>(begin: 1.0, end: 1.15).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+    );
     _animation.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         _controller.reverse();
@@ -86,9 +93,19 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
         });
       }
     });
+    
+    // 闪光动画 - 渐变淡出效果
+    _flashController = AnimationController(
+      duration: const Duration(milliseconds: 600),
+      vsync: this,
+    );
+    _flashAnimation = Tween<double>(begin: 0.8, end: 0.0).animate(
+      CurvedAnimation(parent: _flashController, curve: Curves.easeOut),
+    );
     _fastDropTimer = Timer(Duration.zero, () {});
     _leftMoveTimer = Timer(Duration.zero, () {});
     _rightMoveTimer = Timer(Duration.zero, () {});
+    _gameLoopTimer = Timer(Duration.zero, () {});
     
     _loadHighScore();
     _loadAudioSettings();
@@ -142,17 +159,25 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
         case LogicalKeyboardKey.keyW:
           rotate();
           break;
+        case LogicalKeyboardKey.keyP:
+          togglePause();
+          break;
+        case LogicalKeyboardKey.space:
+          hardDrop();
+          break;
       }
     }
   }
 
-  void startGameLoop() async {
-    while (!gameOver) {
-      await Future.delayed(Duration(milliseconds: gameSpeed.toInt()));
-      if (!gameOver) {
+  void startGameLoop() {
+    _gameLoopTimer?.cancel();
+    _gameLoopTimer = Timer.periodic(Duration(milliseconds: gameSpeed.toInt()), (timer) {
+      if (!gameOver && !gamePaused) {
         moveDown();
+      } else if (gameOver) {
+        timer.cancel();
       }
-    }
+    });
   }
 
   void startGame() {
@@ -168,6 +193,62 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     });
     _audioManager.playBgm();
     startGameLoop();
+  }
+
+  void togglePause() {
+    if (!gameStarted || gameOver) return;
+    
+    setState(() {
+      gamePaused = !gamePaused;
+    });
+    
+    if (gamePaused) {
+      _gameLoopTimer.cancel();
+      _audioManager.pauseBgm();
+    } else {
+      startGameLoop();
+      _audioManager.resumeBgm();
+    }
+  }
+
+  void hardDrop() {
+    if (gameOver || !gameStarted || gamePaused) return;
+    
+    // 快速下落到底部
+    while (!checkCollision(currentPiece.x, currentPiece.y + 1, currentPiece.shape)) {
+      currentPiece.y++;
+    }
+    
+    // 锁定方块并处理消行
+    lockPiece();
+    clearLines();
+    currentPiece = nextPiece;
+    nextPiece = Tetromino.random();
+    
+    // 检查游戏是否结束
+    if (checkCollision(currentPiece.x, currentPiece.y, currentPiece.shape)) {
+      setState(() {
+        gameOver = true;
+      });
+      _audioManager.playGameOver();
+      _audioManager.stopBgm();
+      if (score > highScore) {
+        highScore = score;
+        _saveHighScore();
+      }
+    }
+    
+    setState(() {});
+  }
+
+  int getGhostY() {
+    if (gameOver || !gameStarted) return currentPiece.y;
+    
+    int ghostY = currentPiece.y;
+    while (!checkCollision(currentPiece.x, ghostY + 1, currentPiece.shape)) {
+      ghostY++;
+    }
+    return ghostY;
   }
 
   void moveLeft() {
@@ -329,9 +410,14 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
       setState(() {
         _clearingLines = linesToClear;
       });
-      _controller.forward(from: 0.0);
       
-      Future.delayed(const Duration(milliseconds: 300), () {
+      // 启动缩放动画
+      _controller.forward(from: 0.0);
+      // 启动闪光动画（从高亮渐变淡出）
+      _flashController.forward(from: 0.0);
+      
+      // 延迟后清除行（与动画时长同步）
+      Future.delayed(const Duration(milliseconds: 600), () {
         setState(() {
           int linesCleared = linesToClear.length;
           int startRow = linesToClear.last; // 最上面的消除行
@@ -388,6 +474,10 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
         gameSpeed = newSpeed;
         speedLevel = newSpeedLevel;
       });
+      // 重新启动游戏循环以应用新速度
+      if (gameStarted && !gameOver) {
+        startGameLoop();
+      }
     }
   }
 
@@ -459,28 +549,8 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
         GestureDetector(
           onTap: () {
             setState(() {
-              _isMusicEnabled = !_isMusicEnabled;
-              _audioManager.isMusicEnabled = _isMusicEnabled;
-              _audioManager.toggleMusic();
-              _saveAudioSettings();
-            });
-          },
-          child: Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: _isMusicEnabled ? Colors.blue : Colors.grey[700],
-              shape: BoxShape.circle,
-            ),
-            child: const Text('♪', style: TextStyle(fontSize: 10, color: Colors.white)),
-          ),
-        ),
-        const SizedBox(width: 5),
-        GestureDetector(
-          onTap: () {
-            setState(() {
-              _isSfxEnabled = !_isSfxEnabled;
-              _audioManager.isSfxEnabled = _isSfxEnabled;
               _audioManager.toggleSfx();
+              _isSfxEnabled = _audioManager.isSfxEnabled;
               _saveAudioSettings();
             });
           },
@@ -494,6 +564,23 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildPauseButton() {
+    return GestureDetector(
+      onTap: togglePause,
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: gamePaused ? Colors.orange : Colors.grey[700],
+          shape: BoxShape.circle,
+        ),
+        child: Text(
+          gamePaused ? '▶' : '⏸',
+          style: const TextStyle(fontSize: 10, color: Colors.white),
+        ),
+      ),
     );
   }
 
@@ -539,26 +626,23 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          // 背景渐变
+          // 背景渐变 - 柔和的深色
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Color(0xFF1a1a2e),
-                  Color(0xFF16213e),
-                  Color(0xFF0f3460),
+                  Color(0xFF1e2a3a),
+                  Color(0xFF2a3a4a),
+                  Color(0xFF1e2a3a),
                 ],
               ),
             ),
           ),
-          // 淡淡的毛玻璃效果
-          BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-            child: Container(
-              color: Colors.black.withOpacity(0.1),
-            ),
+          // 柔和的遮罩层（移除模糊，减少视觉疲劳）
+          Container(
+            color: Colors.black.withOpacity(0.02),
           ),
           // 游戏内容
           SafeArea(
@@ -587,6 +671,8 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                           _buildStatItem('Level', '$speedLevel', Colors.cyan),
                           Container(width: 1, height: 16, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 12)),
                           _buildSoundButton(),
+                          Container(width: 1, height: 16, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 12)),
+                          _buildPauseButton(),
                         ],
                       ),
                     ),
@@ -600,82 +686,117 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                         SizedBox(
                           width: boardWidth,
                           height: boardHeight,
-                          child: GridView.builder(
-                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: cols,
-                              childAspectRatio: 1,
-                            ),
-                            itemCount: rows * cols,
-                            itemBuilder: (context, index) {
-                              int row = index ~/ cols;
-                              int col = index % cols;
-                              bool isCurrentPiece = false;
-                              for (int i = 0; i < currentPiece.shape.length; i++) {
-                                for (int j = 0; j < currentPiece.shape[i].length; j++) {
-                                  if (currentPiece.shape[i][j] != 0) {
-                                    int pieceRow = currentPiece.y + i;
-                                    int pieceCol = currentPiece.x + j;
-                                    if (pieceRow == row && pieceCol == col) {
-                                      isCurrentPiece = true;
-                                      break;
+                          child: RepaintBoundary(
+                            child: GridView.builder(
+                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: cols,
+                                childAspectRatio: 1,
+                              ),
+                              itemCount: rows * cols,
+                              itemBuilder: (context, index) {
+                                int row = index ~/ cols;
+                                int col = index % cols;
+                                bool isCurrentPiece = false;
+                                bool isGhostPiece = false;
+                                
+                                // 检测当前方块
+                                for (int i = 0; i < currentPiece.shape.length; i++) {
+                                  for (int j = 0; j < currentPiece.shape[i].length; j++) {
+                                    if (currentPiece.shape[i][j] != 0) {
+                                      int pieceRow = currentPiece.y + i;
+                                      int pieceCol = currentPiece.x + j;
+                                      if (pieceRow == row && pieceCol == col) {
+                                        isCurrentPiece = true;
+                                        break;
+                                      }
                                     }
                                   }
+                                  if (isCurrentPiece) break;
                                 }
-                                if (isCurrentPiece) break;
-                              }
-                              
-                              Color cellColor;
-                              if (isCurrentPiece) {
-                                cellColor = getColor(currentPiece.color);
-                              } else {
-                                cellColor = board[row][col] == 0 ? Colors.grey[800]! : getColor(board[row][col]);
-                              }
-                              
-                              bool isClearing = _clearingLines.contains(row);
-                              
-                              return ScaleTransition(
-                                scale: isClearing ? _animation : AlwaysStoppedAnimation(1.0),
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: cellColor,
-                                    border: Border.all(
-                                      color: isCurrentPiece || board[row][col] != 0 
-                                        ? cellColor.withOpacity(0.8) 
-                                        : Colors.grey[700]!,
-                                      width: 0.3,
-                                    ),
-                                    boxShadow: isCurrentPiece || board[row][col] != 0 ? [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.5),
-                                        offset: const Offset(4, 4),
-                                        blurRadius: 4,
+                                
+                                // 检测幽灵方块
+                                if (!isCurrentPiece) {
+                                  int ghostY = getGhostY();
+                                  for (int i = 0; i < currentPiece.shape.length; i++) {
+                                    for (int j = 0; j < currentPiece.shape[i].length; j++) {
+                                      if (currentPiece.shape[i][j] != 0) {
+                                        int pieceRow = ghostY + i;
+                                        int pieceCol = currentPiece.x + j;
+                                        if (pieceRow == row && pieceCol == col) {
+                                          isGhostPiece = true;
+                                          break;
+                                        }
+                                      }
+                                    }
+                                    if (isGhostPiece) break;
+                                  }
+                                }
+                                
+                                Color cellColor;
+                                if (isCurrentPiece) {
+                                  cellColor = getColor(currentPiece.color);
+                                } else if (isGhostPiece) {
+                                  cellColor = getColor(currentPiece.color).withOpacity(0.3);
+                                } else {
+                                  cellColor = board[row][col] == 0 ? Colors.grey[850]! : getColor(board[row][col]);
+                                }
+                                
+                                bool isClearing = _clearingLines.contains(row);
+                                
+                                return AnimatedBuilder(
+                                  animation: _flashAnimation,
+                                  builder: (context, child) {
+                                    return ScaleTransition(
+                                      scale: isClearing ? _animation : AlwaysStoppedAnimation(1.0),
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: cellColor,
+                                          border: Border.all(
+                                            color: isCurrentPiece || board[row][col] != 0 
+                                              ? cellColor.withOpacity(0.8) 
+                                              : Colors.grey[700]!,
+                                            width: 0.3,
+                                          ),
+                                          boxShadow: isCurrentPiece || board[row][col] != 0 ? [
+                                            BoxShadow(
+                                              color: Colors.black.withOpacity(0.5),
+                                              offset: const Offset(4, 4),
+                                              blurRadius: 4,
+                                            ),
+                                            BoxShadow(
+                                              color: Colors.white.withOpacity(0.2),
+                                              offset: const Offset(-3, -3),
+                                              blurRadius: 3,
+                                            ),
+                                            BoxShadow(
+                                              color: cellColor.withOpacity(0.3),
+                                              offset: const Offset(-1, -1),
+                                              blurRadius: 1,
+                                            ),
+                                          ] : [],
+                                          gradient: isCurrentPiece || board[row][col] != 0 
+                                            ? LinearGradient(
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                                colors: [
+                                                  cellColor.withOpacity(1.0),
+                                                  cellColor.withOpacity(0.7),
+                                                  cellColor.withOpacity(0.5),
+                                                ],
+                                              )
+                                            : null,
+                                        ),
+                                        child: isClearing
+                                          ? Container(
+                                              color: Colors.white.withOpacity(_flashAnimation.value * 0.6),
+                                            )
+                                          : null,
                                       ),
-                                      BoxShadow(
-                                        color: Colors.white.withOpacity(0.2),
-                                        offset: const Offset(-3, -3),
-                                        blurRadius: 3,
-                                      ),
-                                      BoxShadow(
-                                        color: cellColor.withOpacity(0.3),
-                                        offset: const Offset(-1, -1),
-                                        blurRadius: 1,
-                                      ),
-                                    ] : [],
-                                    gradient: isCurrentPiece || board[row][col] != 0 
-                                      ? LinearGradient(
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                          colors: [
-                                            cellColor.withOpacity(1.0),
-                                            cellColor.withOpacity(0.7),
-                                            cellColor.withOpacity(0.5),
-                                          ],
-                                        )
-                                      : null,
-                                  ),
-                                ),
-                              );
-                            },
+                                    );
+                                  },
+                                );
+                              },
+                            ),
                           ),
                         ),
                         
@@ -685,14 +806,14 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                           width: MediaQuery.of(context).size.width >= 600 ? 170 : 120,
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey[600]!, width: 1),
+                            border: Border.all(color: Colors.grey[700]!, width: 0.5),
                             borderRadius: BorderRadius.circular(10),
-                            color: Colors.grey[800],
+                            color: Colors.grey[850],
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.3),
+                                color: Colors.black.withOpacity(0.2),
                                 offset: const Offset(2, 2),
-                                blurRadius: 4,
+                                blurRadius: 6,
                               ),
                             ],
                           ),
@@ -937,6 +1058,43 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                               ),
                             ),
                           ),
+                          
+                          const SizedBox(width: 20),
+                          
+                          // Pause button
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[900],
+                              borderRadius: BorderRadius.circular(15),
+                              border: Border.all(color: Colors.grey[700]!, width: 1),
+                            ),
+                            child: GestureDetector(
+                              onTap: togglePause,
+                              child: Container(
+                                width: controlButtonSize * 1.2,
+                                height: controlButtonSize * 1.2,
+                                decoration: BoxDecoration(
+                                  color: gamePaused ? Colors.orange : Colors.grey[600],
+                                  border: Border.all(color: gamePaused ? Colors.orange[300]! : Colors.grey[500]!, width: 2),
+                                  borderRadius: BorderRadius.circular(30),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.4),
+                                      offset: const Offset(3, 3),
+                                      blurRadius: 4,
+                                    ),
+                                    BoxShadow(
+                                      color: (gamePaused ? Colors.orange : Colors.grey[600])!.withOpacity(0.3),
+                                      offset: const Offset(-2, -2),
+                                      blurRadius: 2,
+                                    ),
+                                  ],
+                                ),
+                                child: Center(child: Text(gamePaused ? '▶' : '⏸', style: const TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold))),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -977,10 +1135,41 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
               ),
             ),
           
+          // 暂停界面浮层
+          if (gamePaused && gameStarted && !gameOver)
+            Container(
+              color: Colors.black.withOpacity(0.6),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text('游戏暂停', style: TextStyle(fontSize: 36, color: Colors.orange, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 20),
+                    Text('当前分数: $score', style: const TextStyle(fontSize: 24, color: Colors.white)),
+                    const SizedBox(height: 10),
+                    Text('速度等级: $speedLevel', style: const TextStyle(fontSize: 20, color: Colors.cyan)),
+                    const SizedBox(height: 60),
+                    ElevatedButton(
+                      onPressed: togglePause,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 60, vertical: 20),
+                        textStyle: const TextStyle(fontSize: 20),
+                        backgroundColor: Colors.orange,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                      ),
+                      child: const Text('继续游戏'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          
           // 游戏结束浮层
           if (gameOver) 
             Container(
-              color: Colors.black.withOpacity(0.7),
+              color: Colors.black.withOpacity(0.6),
               child: Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -1015,110 +1204,12 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   @override
   void dispose() {
     _controller.dispose();
+    _flashController.dispose();
+    _gameLoopTimer.cancel();
+    _fastDropTimer.cancel();
+    _leftMoveTimer.cancel();
+    _rightMoveTimer.cancel();
     RawKeyboard.instance.removeListener(_handleKeyEvent);
     super.dispose();
-  }
-}
-
-class Tetromino {
-  int x;
-  int y;
-  List<List<int>> shape;
-  int color;
-
-  Tetromino(this.x, this.y, this.shape, this.color);
-
-  static Tetromino random() {
-    Random random = Random();
-    int type = random.nextInt(7);
-    List<List<int>> shape;
-    int color;
-
-    switch (type) {
-      case 0: // I piece
-        shape = [
-          [0, 0, 0, 0],
-          [1, 1, 1, 1],
-          [0, 0, 0, 0],
-          [0, 0, 0, 0],
-        ];
-        color = 1;
-        break;
-      case 1: // O piece
-        shape = [
-          [0, 2, 2, 0],
-          [0, 2, 2, 0],
-          [0, 0, 0, 0],
-          [0, 0, 0, 0],
-        ];
-        color = 2;
-        break;
-      case 2: // T piece
-        shape = [
-          [0, 3, 0, 0],
-          [3, 3, 3, 0],
-          [0, 0, 0, 0],
-          [0, 0, 0, 0],
-        ];
-        color = 3;
-        break;
-      case 3: // S piece
-        shape = [
-          [0, 4, 4, 0],
-          [4, 4, 0, 0],
-          [0, 0, 0, 0],
-          [0, 0, 0, 0],
-        ];
-        color = 4;
-        break;
-      case 4: // Z piece
-        shape = [
-          [5, 5, 0, 0],
-          [0, 5, 5, 0],
-          [0, 0, 0, 0],
-          [0, 0, 0, 0],
-        ];
-        color = 5;
-        break;
-      case 5: // J piece
-        shape = [
-          [6, 0, 0, 0],
-          [6, 6, 6, 0],
-          [0, 0, 0, 0],
-          [0, 0, 0, 0],
-        ];
-        color = 6;
-        break;
-      case 6: // L piece
-        shape = [
-          [0, 0, 7, 0],
-          [7, 7, 7, 0],
-          [0, 0, 0, 0],
-          [0, 0, 0, 0],
-        ];
-        color = 7;
-        break;
-      default:
-        shape = [
-          [0, 0, 0, 0],
-          [1, 1, 1, 1],
-          [0, 0, 0, 0],
-          [0, 0, 0, 0],
-        ];
-        color = 1;
-    }
-
-    return Tetromino(3, 0, shape, color);
-  }
-
-  List<List<int>> rotate() {
-    int n = shape.length;
-    List<List<int>> rotated = List.generate(n, (_) => List.generate(n, (_) => 0));
-    for (int i = 0; i < n; i++) {
-      for (int j = 0; j < n; j++) {
-        rotated[j][n - 1 - i] = shape[i][j];
-      }
-    }
-    return rotated;
   }
 }

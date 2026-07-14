@@ -3,69 +3,103 @@ import 'package:audioplayers/audioplayers.dart';
 class AudioManager {
   static final AudioManager _instance = AudioManager._internal();
   factory AudioManager() => _instance;
-  AudioManager._internal();
+  AudioManager._internal() {
+    init();
+  }
 
   final AudioPlayer _bgmPlayer = AudioPlayer();
-  final AudioPlayer _sfxPlayer = AudioPlayer();
+  // 使用多个音效播放器，避免音效冲突
+  final List<AudioPlayer> _sfxPlayers = [];
+  int _currentSfxIndex = 0;
+  static const int _maxSfxPlayers = 4;
+  
   bool isMusicEnabled = true;
   bool isSfxEnabled = true;
+  bool _initialized = false;
 
   Future<void> init() async {
+    if (_initialized) return;
+    _initialized = true;
+    
     await _bgmPlayer.setReleaseMode(ReleaseMode.loop);
     await _bgmPlayer.setVolume(0.5);
-    await _sfxPlayer.setVolume(0.7);
+    
+    // 创建多个音效播放器
+    for (int i = 0; i < _maxSfxPlayers; i++) {
+      final player = AudioPlayer();
+      await player.setVolume(1.0);
+      _sfxPlayers.add(player);
+    }
+  }
+
+  AudioPlayer _getNextSfxPlayer() {
+    final player = _sfxPlayers[_currentSfxIndex];
+    _currentSfxIndex = (_currentSfxIndex + 1) % _sfxPlayers.length;
+    return player;
   }
 
   Future<void> playBgm() async {
     if (!isMusicEnabled) return;
     try {
+      if (_bgmPlayer.state == PlayerState.playing) return;
       await _bgmPlayer.play(AssetSource('audio/tetris_bgm.wav'));
     } catch (e) {
-      // BGM file not found, try to use a built-in tone
+      // BGM file not found
     }
   }
 
   Future<void> stopBgm() async {
-    await _bgmPlayer.stop();
-  }
-
-  Future<void> pauseBgm() async {
-    await _bgmPlayer.pause();
-  }
-
-  Future<void> resumeBgm() async {
-    if (isMusicEnabled) {
-      await _bgmPlayer.resume();
+    try {
+      await _bgmPlayer.stop();
+    } catch (e) {
+      // ignore
     }
   }
 
-  Future<void> playClearLine() async {
-    await playClearLineWithCount(1);
+  Future<void> pauseBgm() async {
+    try {
+      if (_bgmPlayer.state == PlayerState.playing) {
+        await _bgmPlayer.pause();
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  Future<void> resumeBgm() async {
+    if (!isMusicEnabled) return;
+    try {
+      if (_bgmPlayer.state == PlayerState.paused) {
+        await _bgmPlayer.resume();
+      } else {
+        await playBgm();
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   Future<void> playClearLineWithCount(int lineCount) async {
     if (!isSfxEnabled) return;
     try {
-      await _bgmPlayer.setVolume(0.2);
-      if (lineCount == 1) {
-        await _sfxPlayer.setVolume(0.15);
-        await _sfxPlayer.play(AssetSource('audio/clear_line_single.wav'));
+      final player = _getNextSfxPlayer();
+      if (lineCount >= 4) {
+        await player.play(AssetSource('audio/clear_line_multi.wav'));
+      } else if (lineCount >= 2) {
+        await player.play(AssetSource('audio/clear_line_multi.wav'));
       } else {
-        await _sfxPlayer.setVolume(0.2);
-        await _sfxPlayer.play(AssetSource('audio/clear_line_multi.wav'));
+        await player.play(AssetSource('audio/clear_line_single.wav'));
       }
-      await Future.delayed(Duration(milliseconds: lineCount == 1 ? 800 : 1200));
-      await _bgmPlayer.setVolume(0.5);
-      await _sfxPlayer.setVolume(0.7);
     } catch (e) {
-      await _bgmPlayer.setVolume(0.5);
+      // SFX file not found
     }
   }
 
   Future<void> playGameOver() async {
     if (!isSfxEnabled) return;
     try {
-      await _sfxPlayer.play(AssetSource('audio/game_over.wav'));
+      final player = _getNextSfxPlayer();
+      await player.play(AssetSource('audio/game_over.wav'));
     } catch (e) {
       // SFX file not found
     }
@@ -74,7 +108,8 @@ class AudioManager {
   Future<void> playMove() async {
     if (!isSfxEnabled) return;
     try {
-      await _sfxPlayer.play(AssetSource('audio/move.wav'));
+      final player = _getNextSfxPlayer();
+      await player.play(AssetSource('audio/move.wav'));
     } catch (e) {
       // SFX file not found
     }
@@ -83,25 +118,31 @@ class AudioManager {
   Future<void> playRotate() async {
     if (!isSfxEnabled) return;
     try {
-      await _sfxPlayer.play(AssetSource('audio/rotate.wav'));
+      final player = _getNextSfxPlayer();
+      await player.play(AssetSource('audio/rotate.wav'));
     } catch (e) {
       // SFX file not found
     }
   }
 
   void toggleMusic() {
+    isMusicEnabled = !isMusicEnabled;
     if (isMusicEnabled) {
-      pauseBgm();
-    } else {
       resumeBgm();
+    } else {
+      pauseBgm();
     }
   }
 
   void toggleSfx() {
+    isSfxEnabled = !isSfxEnabled;
   }
 
   Future<void> dispose() async {
     await _bgmPlayer.dispose();
-    await _sfxPlayer.dispose();
+    for (final player in _sfxPlayers) {
+      await player.dispose();
+    }
+    _sfxPlayers.clear();
   }
 }
