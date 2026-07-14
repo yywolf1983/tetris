@@ -415,12 +415,17 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   }
 
   void _startLeftMove() {
-    // 开始快速左移，每100毫秒移动一次
-    _leftMoveTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+    // 首次延迟后开始连续左移，降低灵敏度避免误触连发
+    _leftMoveTimer = Timer(const Duration(milliseconds: 180), () {
       if (gameStarted && !gameOver) {
         moveLeft();
-      } else {
-        timer.cancel();
+        _leftMoveTimer = Timer.periodic(const Duration(milliseconds: 110), (timer) {
+          if (gameStarted && !gameOver) {
+            moveLeft();
+          } else {
+            timer.cancel();
+          }
+        });
       }
     });
   }
@@ -433,12 +438,17 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   }
 
   void _startRightMove() {
-    // 开始快速右移，每100毫秒移动一次
-    _rightMoveTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+    // 首次延迟后开始连续右移，降低灵敏度避免误触连发
+    _rightMoveTimer = Timer(const Duration(milliseconds: 180), () {
       if (gameStarted && !gameOver) {
         moveRight();
-      } else {
-        timer.cancel();
+        _rightMoveTimer = Timer.periodic(const Duration(milliseconds: 110), (timer) {
+          if (gameStarted && !gameOver) {
+            moveRight();
+          } else {
+            timer.cancel();
+          }
+        });
       }
     });
   }
@@ -1067,7 +1077,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                         onDown: () { moveLeft(); _startLeftMove(); },
                                         onUp: _stopLeftMove,
                                       ),
-                                      const SizedBox(width: 10),
+                                      const SizedBox(width: 18),
                                       _buildControlButton(
                                         id: 'right',
                                         icon: Icons.arrow_right_rounded,
@@ -1076,7 +1086,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(height: 10),
+                                  const SizedBox(height: 12),
                                       _buildControlButton(
                                         id: 'down',
                                         icon: Icons.arrow_downward_rounded,
@@ -1087,7 +1097,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                 ],
                               ),
                             ),
-                            const SizedBox(width: 26),
+                            const SizedBox(width: 44),
                             // 旋转按钮（青色渐变）
                             _buildControlButton(
                               id: 'rotate',
