@@ -20,10 +20,27 @@ class AudioManager {
   Future<void> init() async {
     if (_initialized) return;
     _initialized = true;
-    
+
+    // 配置全局音频上下文，确保 BGM 与音效可以同时播放而不互相打断
+    try {
+      await AudioPlayer.global.setAudioContext(
+        AudioContext(
+          iOS: AudioContextIOS(
+            category: AVAudioSessionCategory.playback,
+            options: {AVAudioSessionOptions.mixWithOthers},
+          ),
+          android: const AudioContextAndroid(
+            audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+          ),
+        ),
+      );
+    } catch (e) {
+      // ignore
+    }
+
     await _bgmPlayer.setReleaseMode(ReleaseMode.loop);
     await _bgmPlayer.setVolume(0.5);
-    
+
     // 创建多个音效播放器
     for (int i = 0; i < _maxSfxPlayers; i++) {
       final player = AudioPlayer();

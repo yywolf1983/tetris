@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'dart:math' as math;
 import 'dart:ui';
@@ -35,12 +36,13 @@ class TetrisGame extends StatefulWidget {
   _TetrisGameState createState() => _TetrisGameState();
 }
 
-class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateMixin {
+class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const int rows = 20;
   static const int cols = 10;
   static const String highScoreKey = 'tetris_high_score';
   static const String musicEnabledKey = 'tetris_music_enabled';
   static const String sfxEnabledKey = 'tetris_sfx_enabled';
+  static const String gameStateKey = 'tetris_game_state';
   late List<List<int>> board;
   late Tetromino currentPiece;
   late Tetromino nextPiece;
@@ -63,6 +65,8 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   late AudioManager _audioManager;
   late bool _isMusicEnabled;
   late bool _isSfxEnabled;
+  late double controlButtonSize;
+  String? _activeControl;
 
   @override
   void initState() {
@@ -109,7 +113,11 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     
     _loadHighScore();
     _loadAudioSettings();
-    
+    _loadGameState();
+
+    // 监听前后台切换
+    WidgetsBinding.instance.addObserver(this);
+
     // 添加键盘事件监听
     RawKeyboard.instance.addListener(_handleKeyEvent);
   }
@@ -140,6 +148,75 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   Future<void> _saveHighScore() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(highScoreKey, highScore);
+  }
+
+  Map<String, dynamic> _pieceToMap(Tetromino p) => {
+    'x': p.x,
+    'y': p.y,
+    'color': p.color,
+    'shape': p.shape.map((r) => r.join(',')).toList(),
+  };
+
+  Tetromino _pieceFromMap(Map<String, dynamic> m) {
+    final shape = (m['shape'] as List)
+        .map((r) => (r as String).split(',').map((e) => int.parse(e)).toList())
+        .toList();
+    return Tetromino(m['x'] as int, m['y'] as int, shape, m['color'] as int);
+  }
+
+  Future<void> _saveGameState() async {
+    if (!gameStarted || gameOver) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final state = <String, dynamic>{
+        'score': score,
+        'speedLevel': speedLevel,
+        'gameSpeed': gameSpeed,
+        'board': board.expand((r) => r).toList(),
+        'current': _pieceToMap(currentPiece),
+        'next': _pieceToMap(nextPiece),
+      };
+      await prefs.setString(gameStateKey, jsonEncode(state));
+    } catch (e) {
+      // 忽略序列化异常
+    }
+  }
+
+  Future<void> _loadGameState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(gameStateKey);
+      if (raw == null) return;
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      final boardFlat = (m['board'] as List).cast<int>();
+      final restoredBoard = List.generate(
+        rows,
+        (i) => boardFlat.sublist(i * cols, (i + 1) * cols),
+      );
+      setState(() {
+        board = restoredBoard;
+        score = m['score'] as int;
+        speedLevel = m['speedLevel'] as int;
+        gameSpeed = m['gameSpeed'] as double;
+        currentPiece = _pieceFromMap(m['current'] as Map<String, dynamic>);
+        nextPiece = _pieceFromMap(m['next'] as Map<String, dynamic>);
+        gameStarted = true;
+        gameOver = false;
+        // 恢复后保持暂停状态，由玩家手动继续
+        gamePaused = true;
+      });
+    } catch (e) {
+      // 状态损坏则忽略
+    }
+  }
+
+  Future<void> _clearGameState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(gameStateKey);
+    } catch (e) {
+      // 忽略
+    }
   }
 
   void _handleKeyEvent(RawKeyEvent event) {
@@ -205,9 +282,22 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     if (gamePaused) {
       _gameLoopTimer.cancel();
       _audioManager.pauseBgm();
+      _saveGameState();
     } else {
       startGameLoop();
       _audioManager.resumeBgm();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 切换到后台时自动暂停并保存当前游戏状态
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      if (gameStarted && !gameOver && !gamePaused) {
+        togglePause();
+      } else {
+        _saveGameState();
+      }
     }
   }
 
@@ -285,6 +375,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
         });
         _audioManager.playGameOver();
         _audioManager.stopBgm();
+        _clearGameState();
         if (score > highScore) {
           highScore = score;
           _saveHighScore();
@@ -481,18 +572,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     }
   }
 
-  Color getColor(int colorCode) {
-    switch (colorCode) {
-      case 1: return Colors.cyan;
-      case 2: return Colors.yellow;
-      case 3: return Colors.purple;
-      case 4: return Colors.green;
-      case 5: return Colors.red;
-      case 6: return Colors.blue;
-      case 7: return Colors.orange;
-      default: return Colors.grey[200]!;
-    }
-  }
+  Color getColor(int colorCode) => blockColor(colorCode);
 
   Widget _buildNextPiecePreview() {
     return Container(
@@ -542,28 +622,69 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     );
   }
 
-  Widget _buildSoundButton() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        GestureDetector(
-          onTap: () {
-            setState(() {
-              _audioManager.toggleSfx();
-              _isSfxEnabled = _audioManager.isSfxEnabled;
-              _saveAudioSettings();
-            });
-          },
-          child: Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: _isSfxEnabled ? Colors.green : Colors.grey[700],
-              shape: BoxShape.circle,
-            ),
-            child: const Text('♫', style: TextStyle(fontSize: 10, color: Colors.white)),
+  Widget _buildToggleButton({
+    required IconData enabledIcon,
+    required IconData disabledIcon,
+    required bool enabled,
+    required VoidCallback onTap,
+    List<Color>? activeGradient,
+  }) {
+    final List<Color> active = activeGradient ?? const [Color(0xFF26c6da), Color(0xFF1e88e5)];
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.all(5),
+        decoration: BoxDecoration(
+          gradient: enabled ? LinearGradient(colors: active) : null,
+          color: enabled ? null : Colors.grey[700],
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white.withOpacity(0.18),
+            width: 1,
           ),
+          boxShadow: enabled
+              ? [BoxShadow(color: active.last.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 2))]
+              : [],
         ),
-      ],
+        child: Icon(
+          enabled ? enabledIcon : disabledIcon,
+          size: 14,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMusicButton() {
+    return _buildToggleButton(
+      enabledIcon: Icons.music_note_rounded,
+      disabledIcon: Icons.music_off_rounded,
+      enabled: _isMusicEnabled,
+      activeGradient: const [Color(0xFF7e57c2), Color(0xFF5e35b1)],
+      onTap: () {
+        setState(() {
+          _audioManager.toggleMusic();
+          _isMusicEnabled = _audioManager.isMusicEnabled;
+          _saveAudioSettings();
+        });
+      },
+    );
+  }
+
+  Widget _buildSfxButton() {
+    return _buildToggleButton(
+      enabledIcon: Icons.volume_up_rounded,
+      disabledIcon: Icons.volume_off_rounded,
+      enabled: _isSfxEnabled,
+      activeGradient: const [Color(0xFF26c6da), Color(0xFF1e88e5)],
+      onTap: () {
+        setState(() {
+          _audioManager.toggleSfx();
+          _isSfxEnabled = _audioManager.isSfxEnabled;
+          _saveAudioSettings();
+        });
+      },
     );
   }
 
@@ -579,6 +700,109 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
         child: Text(
           gamePaused ? '▶' : '⏸',
           style: const TextStyle(fontSize: 10, color: Colors.white),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGameBoard(double width, double height, double cellSize) {
+    return AnimatedBuilder(
+      animation: Listenable.merge([_flashAnimation, _animation]),
+      builder: (context, _) {
+        return CustomPaint(
+          size: Size(width, height),
+          painter: GameBoardPainter(
+            board: board,
+            currentPiece: currentPiece,
+            ghostY: getGhostY(),
+            clearingLines: _clearingLines,
+            flashValue: _flashAnimation.value,
+            clearScale: _animation.value,
+            cellSize: cellSize,
+            rows: rows,
+            cols: cols,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildOverlayButton(String label, VoidCallback onPressed, List<Color> gradient) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 52, vertical: 16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: gradient),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: gradient.last.withOpacity(0.45), blurRadius: 16, offset: const Offset(0, 5)),
+          ],
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildControlButton({
+    required String id,
+    required IconData icon,
+    required VoidCallback onDown,
+    required VoidCallback onUp,
+    double? size,
+    double? width,
+    List<Color>? colors,
+  }) {
+    final double s = size ?? controlButtonSize;
+    final double w = width ?? s;
+    final bool active = _activeControl == id;
+    final List<Color> base = colors ?? const [Color(0xFF2a3340), Color(0xFF1c232c)];
+    return GestureDetector(
+      onTapDown: (_) {
+        setState(() => _activeControl = id);
+        onDown();
+      },
+      onTapUp: (_) {
+        setState(() => _activeControl = null);
+        onUp();
+      },
+      onTapCancel: () {
+        setState(() => _activeControl = null);
+        onUp();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 90),
+        transformAlignment: Alignment.center,
+        transform: active ? (Matrix4.identity()..scale(0.94)) : Matrix4.identity(),
+        width: w,
+        height: s,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: active
+                ? base.map((c) => Color.alphaBlend(Colors.white.withOpacity(0.18), c)).toList()
+                : base,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: active ? Colors.white.withOpacity(0.6) : Colors.white.withOpacity(0.14),
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(active ? 0.15 : 0.45),
+              offset: Offset(0, active ? 1 : 4),
+              blurRadius: active ? 3 : 8,
+            ),
+          ],
+        ),
+        child: Center(
+          child: Icon(icon, size: s * 0.5, color: Colors.white,
+              shadows: const [Shadow(color: Colors.black45, blurRadius: 2)]),
         ),
       ),
     );
@@ -604,23 +828,26 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     // 确保boardWidth为正数
     boardWidth = boardWidth.clamp(100.0, screenWidth);
     
-    double cellSize = boardWidth / cols;
-    double boardHeight = cellSize * rows;
+    // 网格与边框/圆角之间的内边距，避免方块被圆角裁切或被边框遮盖
+    const double boardPadding = 3.0;
+
+    double cellSize = (boardWidth - 2 * boardPadding) / cols;
+    double boardHeight = cellSize * rows + 2 * boardPadding;
     
     // 确保游戏板高度不超出最大游戏高度
     if (boardHeight > maxGameHeight * 0.8) {
       boardHeight = maxGameHeight * 0.8;
       // 确保boardHeight为正数
       boardHeight = boardHeight.clamp(200.0, maxGameHeight);
-      boardWidth = boardHeight / 2;
-      cellSize = boardWidth / cols;
+      cellSize = (boardHeight - 2 * boardPadding) / rows;
+      boardWidth = cellSize * cols + 2 * boardPadding;
     }
     
     // 再次确保boardWidth为正数
     boardWidth = boardWidth.clamp(100.0, screenWidth);
     
     // 计算按钮大小，根据屏幕宽度自适应
-    double controlButtonSize = screenWidth * 0.18;
+    controlButtonSize = screenWidth * 0.18;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -664,13 +891,29 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text('Tetris', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1)),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 14,
+                                height: 14,
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(colors: [Colors.cyan, Colors.blue]),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Text('TETRIS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 2)),
+                            ],
+                          ),
                           Container(width: 1, height: 16, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 12)),
                           _buildStatItem('Best', '$highScore', Colors.yellow),
                           Container(width: 1, height: 16, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 12)),
                           _buildStatItem('Level', '$speedLevel', Colors.cyan),
                           Container(width: 1, height: 16, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 12)),
-                          _buildSoundButton(),
+                          _buildMusicButton(),
+                          const SizedBox(width: 8),
+                          _buildSfxButton(),
                           Container(width: 1, height: 16, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 12)),
                           _buildPauseButton(),
                         ],
@@ -683,119 +926,24 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // Game board
-                        SizedBox(
+                        Container(
                           width: boardWidth,
                           height: boardHeight,
-                          child: RepaintBoundary(
-                            child: GridView.builder(
-                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: cols,
-                                childAspectRatio: 1,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.cyanAccent.withOpacity(0.35), width: 2),
+                            boxShadow: [
+                              BoxShadow(color: Colors.cyanAccent.withOpacity(0.15), blurRadius: 18, spreadRadius: 1),
+                              BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 12, offset: const Offset(0, 6)),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Padding(
+                              padding: const EdgeInsets.all(boardPadding),
+                              child: RepaintBoundary(
+                                child: _buildGameBoard(cellSize * cols, cellSize * rows, cellSize),
                               ),
-                              itemCount: rows * cols,
-                              itemBuilder: (context, index) {
-                                int row = index ~/ cols;
-                                int col = index % cols;
-                                bool isCurrentPiece = false;
-                                bool isGhostPiece = false;
-                                
-                                // 检测当前方块
-                                for (int i = 0; i < currentPiece.shape.length; i++) {
-                                  for (int j = 0; j < currentPiece.shape[i].length; j++) {
-                                    if (currentPiece.shape[i][j] != 0) {
-                                      int pieceRow = currentPiece.y + i;
-                                      int pieceCol = currentPiece.x + j;
-                                      if (pieceRow == row && pieceCol == col) {
-                                        isCurrentPiece = true;
-                                        break;
-                                      }
-                                    }
-                                  }
-                                  if (isCurrentPiece) break;
-                                }
-                                
-                                // 检测幽灵方块
-                                if (!isCurrentPiece) {
-                                  int ghostY = getGhostY();
-                                  for (int i = 0; i < currentPiece.shape.length; i++) {
-                                    for (int j = 0; j < currentPiece.shape[i].length; j++) {
-                                      if (currentPiece.shape[i][j] != 0) {
-                                        int pieceRow = ghostY + i;
-                                        int pieceCol = currentPiece.x + j;
-                                        if (pieceRow == row && pieceCol == col) {
-                                          isGhostPiece = true;
-                                          break;
-                                        }
-                                      }
-                                    }
-                                    if (isGhostPiece) break;
-                                  }
-                                }
-                                
-                                Color cellColor;
-                                if (isCurrentPiece) {
-                                  cellColor = getColor(currentPiece.color);
-                                } else if (isGhostPiece) {
-                                  cellColor = getColor(currentPiece.color).withOpacity(0.3);
-                                } else {
-                                  cellColor = board[row][col] == 0 ? Colors.grey[850]! : getColor(board[row][col]);
-                                }
-                                
-                                bool isClearing = _clearingLines.contains(row);
-                                
-                                return AnimatedBuilder(
-                                  animation: _flashAnimation,
-                                  builder: (context, child) {
-                                    return ScaleTransition(
-                                      scale: isClearing ? _animation : AlwaysStoppedAnimation(1.0),
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: cellColor,
-                                          border: Border.all(
-                                            color: isCurrentPiece || board[row][col] != 0 
-                                              ? cellColor.withOpacity(0.8) 
-                                              : Colors.grey[700]!,
-                                            width: 0.3,
-                                          ),
-                                          boxShadow: isCurrentPiece || board[row][col] != 0 ? [
-                                            BoxShadow(
-                                              color: Colors.black.withOpacity(0.5),
-                                              offset: const Offset(4, 4),
-                                              blurRadius: 4,
-                                            ),
-                                            BoxShadow(
-                                              color: Colors.white.withOpacity(0.2),
-                                              offset: const Offset(-3, -3),
-                                              blurRadius: 3,
-                                            ),
-                                            BoxShadow(
-                                              color: cellColor.withOpacity(0.3),
-                                              offset: const Offset(-1, -1),
-                                              blurRadius: 1,
-                                            ),
-                                          ] : [],
-                                          gradient: isCurrentPiece || board[row][col] != 0 
-                                            ? LinearGradient(
-                                                begin: Alignment.topLeft,
-                                                end: Alignment.bottomRight,
-                                                colors: [
-                                                  cellColor.withOpacity(1.0),
-                                                  cellColor.withOpacity(0.7),
-                                                  cellColor.withOpacity(0.5),
-                                                ],
-                                              )
-                                            : null,
-                                        ),
-                                        child: isClearing
-                                          ? Container(
-                                              color: Colors.white.withOpacity(_flashAnimation.value * 0.6),
-                                            )
-                                          : null,
-                                      ),
-                                    );
-                                  },
-                                );
-                              },
                             ),
                           ),
                         ),
@@ -822,10 +970,17 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                               Container(
                                 padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
                                 decoration: BoxDecoration(
-                                  color: Colors.grey[700],
+                                  gradient: const LinearGradient(colors: [Color(0xFF26c6da), Color(0xFF1e88e5)]),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                                child: const Text('Next', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.filter_none_rounded, size: 14, color: Colors.white),
+                                    SizedBox(width: 6),
+                                    Text('Next', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
                               ),
                               const SizedBox(height: 10),
                               Container(
@@ -840,10 +995,17 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                               Container(
                                 padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
                                 decoration: BoxDecoration(
-                                  color: Colors.grey[700],
+                                  gradient: const LinearGradient(colors: [Color(0xFFffb300), Color(0xFFfb8c00)]),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                                child: const Text('Score', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.stars_rounded, size: 14, color: Colors.white),
+                                    SizedBox(width: 6),
+                                    Text('Score', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
                               ),
                               const SizedBox(height: 10),
                               Container(
@@ -868,236 +1030,76 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                     // 减小间距，特别是桌面端
                     const SizedBox(height: 20),
                     
-                    // Game controls - only show on mobile devices (including mobile browsers)
-                    if (MediaQuery.of(context).size.width < 600) Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[600]!, width: 1),
-                        borderRadius: BorderRadius.circular(20),
-                        color: Colors.grey[800],
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.3),
-                            offset: const Offset(0, 4),
-                            blurRadius: 8,
+                    // Game controls - 仅移动端显示
+                    if (MediaQuery.of(context).size.width < 600)
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 8),
+                        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 18),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [Color(0xFF1a2230), Color(0xFF141b26)],
                           ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          // Direction pad (经典十字方向键)
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[900],
-                              borderRadius: BorderRadius.circular(15),
-                              border: Border.all(color: Colors.grey[700]!, width: 1),
-                            ),
-                            child: Column(
-                              children: [
-                                // 左右按钮
-                                Row(
-                                  children: [
-                                    GestureDetector(
-                                              onTapDown: (details) {
-                                                // 立即移动一次
-                                                moveLeft();
-                                                // 开始快速左移
-                                                _startLeftMove();
-                                              },
-                                              onTapUp: (details) {
-                                                // 结束长按
-                                                _stopLeftMove();
-                                              },
-                                              onTapCancel: () {
-                                                // 结束长按
-                                                _stopLeftMove();
-                                              },
-                                              child: Container(
-                                                width: controlButtonSize,
-                                                height: controlButtonSize,
-                                                decoration: BoxDecoration(
-                                                  color: Colors.grey[700],
-                                                  border: Border.all(color: Colors.grey[500]!, width: 1),
-                                                  borderRadius: BorderRadius.circular(8),
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: Colors.black.withOpacity(0.3),
-                                                      offset: const Offset(2, 2),
-                                                      blurRadius: 2,
-                                                    ),
-                                                    BoxShadow(
-                                                      color: Colors.white.withOpacity(0.1),
-                                                      offset: const Offset(-1, -1),
-                                                      blurRadius: 1,
-                                                    ),
-                                                  ],
-                                                ),
-                                                child: const Center(child: Text('←', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold))),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            GestureDetector(
-                                              onTapDown: (details) {
-                                                // 立即移动一次
-                                                moveRight();
-                                                // 开始快速右移
-                                                _startRightMove();
-                                              },
-                                              onTapUp: (details) {
-                                                // 结束长按
-                                                _stopRightMove();
-                                              },
-                                              onTapCancel: () {
-                                                // 结束长按
-                                                _stopRightMove();
-                                              },
-                                              child: Container(
-                                                width: controlButtonSize,
-                                                height: controlButtonSize,
-                                                decoration: BoxDecoration(
-                                                  color: Colors.grey[700],
-                                                  border: Border.all(color: Colors.grey[500]!, width: 1),
-                                                  borderRadius: BorderRadius.circular(8),
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: Colors.black.withOpacity(0.3),
-                                                      offset: const Offset(2, 2),
-                                                      blurRadius: 2,
-                                                    ),
-                                                    BoxShadow(
-                                                      color: Colors.white.withOpacity(0.1),
-                                                      offset: const Offset(-1, -1),
-                                                      blurRadius: 1,
-                                                    ),
-                                                  ],
-                                                ),
-                                                child: const Center(child: Text('→', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold))),
-                                              ),
-                                            ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                // 向下按钮
-                                GestureDetector(
-                                          onTapDown: (details) {
-                                            // 立即移动一次
-                                            moveDown();
-                                            // 开始快速下落
-                                            _startFastDrop();
-                                          },
-                                          onTapUp: (details) {
-                                            // 结束长按
-                                            _stopFastDrop();
-                                          },
-                                          onTapCancel: () {
-                                            // 结束长按
-                                            _stopFastDrop();
-                                          },
-                                          child: Container(
-                                            width: controlButtonSize * 2 + 8,
-                                            height: controlButtonSize,
-                                            decoration: BoxDecoration(
-                                              color: Colors.grey[700],
-                                              border: Border.all(color: Colors.grey[500]!, width: 1),
-                                              borderRadius: BorderRadius.circular(8),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: Colors.black.withOpacity(0.3),
-                                                  offset: const Offset(2, 2),
-                                                  blurRadius: 2,
-                                                ),
-                                                BoxShadow(
-                                                  color: Colors.white.withOpacity(0.1),
-                                                  offset: const Offset(-1, -1),
-                                                  blurRadius: 1,
-                                                ),
-                                              ],
-                                            ),
-                                            child: const Center(child: Text('↓', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold))),
-                                          ),
-                                        ),
-                              ],
-                            ),
-                          ),
-                          
-                          const SizedBox(width: 40),
-                          
-                          // A button for rotate (圆形按钮)
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[900],
-                              borderRadius: BorderRadius.circular(15),
-                              border: Border.all(color: Colors.grey[700]!, width: 1),
-                            ),
-                            child: GestureDetector(
-                              onTap: rotate,
-                              child: Container(
-                                width: controlButtonSize * 1.6,
-                                height: controlButtonSize * 1.6,
-                                decoration: BoxDecoration(
-                                  color: Colors.blue,
-                                  border: Border.all(color: Colors.blue[300]!, width: 2),
-                                  borderRadius: BorderRadius.circular(40),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.4),
-                                      offset: const Offset(3, 3),
-                                      blurRadius: 4,
-                                    ),
-                                    BoxShadow(
-                                      color: Colors.blue.withOpacity(0.3),
-                                      offset: const Offset(-2, -2),
-                                      blurRadius: 2,
-                                    ),
-                                  ],
-                                ),
-                                child: const Center(child: Text('A', style: TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold))),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(color: Colors.white.withOpacity(0.1)),
+                          boxShadow: [
+                            BoxShadow(color: Colors.black.withOpacity(0.35), offset: const Offset(0, 6), blurRadius: 14),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            // 方向键区
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.25),
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      _buildControlButton(
+                                        id: 'left',
+                                        icon: Icons.arrow_left_rounded,
+                                        onDown: () { moveLeft(); _startLeftMove(); },
+                                        onUp: _stopLeftMove,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      _buildControlButton(
+                                        id: 'right',
+                                        icon: Icons.arrow_right_rounded,
+                                        onDown: () { moveRight(); _startRightMove(); },
+                                        onUp: _stopRightMove,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                      _buildControlButton(
+                                        id: 'down',
+                                        icon: Icons.arrow_downward_rounded,
+                                    onDown: () { moveDown(); _startFastDrop(); },
+                                    onUp: _stopFastDrop,
+                                    width: controlButtonSize * 2 + 10,
+                                  ),
+                                ],
                               ),
                             ),
-                          ),
-                          
-                          const SizedBox(width: 20),
-                          
-                          // Pause button
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[900],
-                              borderRadius: BorderRadius.circular(15),
-                              border: Border.all(color: Colors.grey[700]!, width: 1),
+                            const SizedBox(width: 26),
+                            // 旋转按钮（青色渐变）
+                            _buildControlButton(
+                              id: 'rotate',
+                              icon: Icons.rotate_right_rounded,
+                              onDown: rotate,
+                              onUp: () {},
+                              size: controlButtonSize * 1.7,
+                              colors: [Colors.cyan, Colors.blue],
                             ),
-                            child: GestureDetector(
-                              onTap: togglePause,
-                              child: Container(
-                                width: controlButtonSize * 1.2,
-                                height: controlButtonSize * 1.2,
-                                decoration: BoxDecoration(
-                                  color: gamePaused ? Colors.orange : Colors.grey[600],
-                                  border: Border.all(color: gamePaused ? Colors.orange[300]! : Colors.grey[500]!, width: 2),
-                                  borderRadius: BorderRadius.circular(30),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.4),
-                                      offset: const Offset(3, 3),
-                                      blurRadius: 4,
-                                    ),
-                                    BoxShadow(
-                                      color: (gamePaused ? Colors.orange : Colors.grey[600])!.withOpacity(0.3),
-                                      offset: const Offset(-2, -2),
-                                      blurRadius: 2,
-                                    ),
-                                  ],
-                                ),
-                                child: Center(child: Text(gamePaused ? '▶' : '⏸', style: const TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold))),
-                              ),
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -1105,32 +1107,43 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
           ),
           
           // 开始界面浮层
-          if (!gameStarted) 
+          if (!gameStarted)
             Container(
-              color: Colors.black.withOpacity(0.7),
+              color: Colors.black.withOpacity(0.78),
               child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text('Welcome to Tetris!', style: TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 20),
-                    MediaQuery.of(context).size.width >= 600 
-                      ? const Text('Use WASD to control', style: TextStyle(fontSize: 18, color: Colors.white)) 
-                      : const Text('Use on-screen buttons to control', style: TextStyle(fontSize: 18, color: Colors.white)),
-                    const SizedBox(height: 40),
-                    ElevatedButton(
-                      onPressed: startGame,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 60, vertical: 25),
-                        textStyle: const TextStyle(fontSize: 24),
-                        backgroundColor: Colors.blue,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                      ),
-                      child: const Text('Start Game'),
+                child: Container(
+                  width: 340,
+                  padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 28),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF1b2735), Color(0xFF243447)],
                     ),
-                  ],
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: Colors.white.withOpacity(0.12)),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 30, offset: const Offset(0, 10)),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.view_module_rounded, size: 54, color: Colors.cyanAccent),
+                      const SizedBox(height: 14),
+                      const Text('TETRIS', style: TextStyle(fontSize: 38, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 5)),
+                      const SizedBox(height: 8),
+                      Text(
+                        MediaQuery.of(context).size.width >= 600
+                            ? 'WASD 移动 · 空格速降 · P 暂停'
+                            : '屏幕按钮控制 · A 旋转',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 14, color: Color(0xFF9fb3c8)),
+                      ),
+                      const SizedBox(height: 32),
+                      _buildOverlayButton('开始游戏', startGame, [Colors.cyan, Colors.blue]),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1138,61 +1151,75 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
           // 暂停界面浮层
           if (gamePaused && gameStarted && !gameOver)
             Container(
-              color: Colors.black.withOpacity(0.6),
+              color: Colors.black.withOpacity(0.7),
               child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text('游戏暂停', style: TextStyle(fontSize: 36, color: Colors.orange, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 20),
-                    Text('当前分数: $score', style: const TextStyle(fontSize: 24, color: Colors.white)),
-                    const SizedBox(height: 10),
-                    Text('速度等级: $speedLevel', style: const TextStyle(fontSize: 20, color: Colors.cyan)),
-                    const SizedBox(height: 60),
-                    ElevatedButton(
-                      onPressed: togglePause,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 60, vertical: 20),
-                        textStyle: const TextStyle(fontSize: 20),
-                        backgroundColor: Colors.orange,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                      ),
-                      child: const Text('继续游戏'),
+                child: Container(
+                  width: 300,
+                  padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 28),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF2a2433), Color(0xFF342a40)],
                     ),
-                  ],
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: Colors.white.withOpacity(0.12)),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 30, offset: const Offset(0, 10)),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.pause_circle_filled_rounded, size: 50, color: Colors.orange),
+                      const SizedBox(height: 12),
+                      const Text('已暂停', style: TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: Colors.orange)),
+                      const SizedBox(height: 10),
+                      Text('当前分数: $score', style: const TextStyle(fontSize: 22, color: Colors.white)),
+                      const SizedBox(height: 6),
+                      Text('速度等级: $speedLevel', style: const TextStyle(fontSize: 18, color: Colors.cyan)),
+                      const SizedBox(height: 28),
+                      _buildOverlayButton('继续游戏', togglePause, [Colors.orange, Colors.deepOrange]),
+                    ],
+                  ),
                 ),
               ),
             ),
           
           // 游戏结束浮层
-          if (gameOver) 
+          if (gameOver)
             Container(
-              color: Colors.black.withOpacity(0.6),
+              color: Colors.black.withOpacity(0.72),
               child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text('Game Over!', style: TextStyle(fontSize: 36, color: Colors.red, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 20),
-                    Text('Score: $score', style: const TextStyle(fontSize: 24, color: Colors.white)),
-                    const SizedBox(height: 10),
-                    Text('Best: $highScore', style: const TextStyle(fontSize: 20, color: Colors.yellow)),
-                    const SizedBox(height: 60),
-                    ElevatedButton(
-                      onPressed: startGame,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 60, vertical: 20),
-                        textStyle: const TextStyle(fontSize: 20),
-                        backgroundColor: Colors.blue,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                      ),
-                      child: const Text('重新开始'),
+                child: Container(
+                  width: 300,
+                  padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 28),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF331c1c), Color(0xFF3a2222)],
                     ),
-                  ],
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: Colors.white.withOpacity(0.12)),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 30, offset: const Offset(0, 10)),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.sentiment_very_dissatisfied_rounded, size: 50, color: Colors.redAccent),
+                      const SizedBox(height: 12),
+                      const Text('游戏结束', style: TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                      const SizedBox(height: 14),
+                      Text('本局得分: $score', style: const TextStyle(fontSize: 22, color: Colors.white)),
+                      const SizedBox(height: 6),
+                      Text('最高分: $highScore', style: const TextStyle(fontSize: 18, color: Colors.yellow)),
+                      const SizedBox(height: 28),
+                      _buildOverlayButton('再来一局', startGame, [Colors.redAccent, Colors.pink]),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1210,6 +1237,191 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     _leftMoveTimer.cancel();
     _rightMoveTimer.cancel();
     RawKeyboard.instance.removeListener(_handleKeyEvent);
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
+}
+
+Color blockColor(int code) {
+  switch (code) {
+    case 1: return Colors.cyan;
+    case 2: return Colors.yellow;
+    case 3: return Colors.purple;
+    case 4: return Colors.green;
+    case 5: return Colors.red;
+    case 6: return Colors.blue;
+    case 7: return Colors.orange;
+    default: return const Color(0xFFe0e0e0);
+  }
+}
+
+class GameBoardPainter extends CustomPainter {
+  final List<List<int>> board;
+  final Tetromino currentPiece;
+  final int ghostY;
+  final List<int> clearingLines;
+  final double flashValue;
+  final double clearScale;
+  final double cellSize;
+  final int rows;
+  final int cols;
+
+  GameBoardPainter({
+    required this.board,
+    required this.currentPiece,
+    required this.ghostY,
+    required this.clearingLines,
+    required this.flashValue,
+    required this.clearScale,
+    required this.cellSize,
+    required this.rows,
+    required this.cols,
+  });
+
+  Color _lighten(Color c, double t) => Color.alphaBlend(Colors.white.withOpacity(t), c);
+  Color _darken(Color c, double t) => Color.alphaBlend(Colors.black.withOpacity(t), c);
+
+  void _drawEmpty(Canvas canvas, double x, double y) {
+    final r = Rect.fromLTWH(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1);
+    canvas.drawRect(r, Paint()..color = const Color(0xFF0d1219));
+    // 极淡网格线，弱化单元格之间的对比
+    canvas.drawRect(
+      r,
+      Paint()
+        ..color = Colors.white.withOpacity(0.018)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.5,
+    );
+  }
+
+  void _drawBlock(Canvas canvas, double x, double y, Color base,
+      {bool ghost = false, double scale = 1.0, double flash = 0.0}) {
+    final inset = cellSize * 0.01;
+    final rect = Rect.fromLTWH(x + inset, y + inset, cellSize - 2 * inset, cellSize - 2 * inset);
+    final radius = Radius.circular(cellSize * 0.16);
+
+    canvas.save();
+    if (scale != 1.0) {
+      final cx = x + cellSize / 2;
+      final cy = y + cellSize / 2;
+      canvas.translate(cx, cy);
+      canvas.scale(scale, scale);
+      canvas.translate(-cx, -cy);
+    }
+
+    final rrect = RRect.fromRectAndRadius(rect, radius);
+
+    if (ghost) {
+      canvas.drawRRect(rrect, Paint()..color = base.withOpacity(0.14));
+      canvas.drawRRect(
+        rrect,
+        Paint()
+          ..color = base.withOpacity(0.45)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2,
+      );
+    } else {
+      // 轻微投影，避免每个方块被阴影割裂
+      canvas.drawShadow(Path()..addRRect(rrect), Colors.black.withOpacity(0.4), 2.5, false);
+      // 立体渐变主体（左上亮、右下暗）
+      final body = Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [_lighten(base, 0.32), base, _darken(base, 0.28)],
+          stops: const [0.0, 0.5, 1.0],
+        ).createShader(rect);
+      canvas.drawRRect(rrect, body);
+
+      // 顶部玻璃高光
+      final gloss = Rect.fromLTWH(
+        rect.left + rect.width * 0.14,
+        rect.top + rect.height * 0.1,
+        rect.width * 0.72,
+        rect.height * 0.42,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(gloss, Radius.circular(cellSize * 0.14)),
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.white.withOpacity(0.28), Colors.white.withOpacity(0.0)],
+          ).createShader(gloss),
+      );
+
+      // 仅用极淡内高光勾边，不再加深色描边，避免方块间出现割裂感
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(rect.left + 0.8, rect.top + 0.8, rect.width - 1.6, rect.height - 1.6),
+          Radius.circular(cellSize * 0.14),
+        ),
+        Paint()
+          ..color = Colors.white.withOpacity(0.1)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.8,
+      );
+    }
+
+    if (flash > 0) {
+      canvas.drawRRect(rrect, Paint()..color = Colors.white.withOpacity(flash * 0.7));
+    }
+
+    canvas.restore();
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..color = const Color(0xFF0b0f14),
+    );
+
+    // 已固定的方块
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        final code = board[r][c];
+        final x = c * cellSize;
+        final y = r * cellSize;
+        if (code != 0) {
+          final clearing = clearingLines.contains(r);
+          _drawBlock(
+            canvas,
+            x,
+            y,
+            blockColor(code),
+            scale: clearing ? clearScale : 1.0,
+            flash: clearing ? flashValue : 0.0,
+          );
+        } else {
+          _drawEmpty(canvas, x, y);
+        }
+      }
+    }
+
+    // 幽灵方块
+    for (int i = 0; i < currentPiece.shape.length; i++) {
+      for (int j = 0; j < currentPiece.shape[i].length; j++) {
+        if (currentPiece.shape[i][j] != 0) {
+          final x = (currentPiece.x + j) * cellSize;
+          final y = (ghostY + i) * cellSize;
+          if (y >= 0) _drawBlock(canvas, x, y, blockColor(currentPiece.color), ghost: true);
+        }
+      }
+    }
+
+    // 当前方块
+    for (int i = 0; i < currentPiece.shape.length; i++) {
+      for (int j = 0; j < currentPiece.shape[i].length; j++) {
+        if (currentPiece.shape[i][j] != 0) {
+          final x = (currentPiece.x + j) * cellSize;
+          final y = (currentPiece.y + i) * cellSize;
+          if (y >= 0) _drawBlock(canvas, x, y, blockColor(currentPiece.color));
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant GameBoardPainter old) => true;
 }

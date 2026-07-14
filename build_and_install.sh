@@ -89,15 +89,12 @@ build_android() {
         print_success "Android APK 编译完成: $APK_PATH"
         print_info "APK 大小: $(du -h "$APK_PATH" | cut -f1)"
         
-        # 检查是否有连接的 Android 设备
+        # 检查是否有连接的 Android 设备并自动安装
         if flutter devices | grep -q "android"; then
-            read -p "是否安装到连接的 Android 设备？(y/N): " install_choice
-            if [[ $install_choice =~ ^[Yy]$ ]]; then
-                flutter install
-                print_success "应用已安装到 Android 设备"
-            fi
+            flutter install
+            print_success "应用已安装到 Android 设备"
         else
-            print_warning "未检测到连接的 Android 设备"
+            print_warning "未检测到连接的 Android 设备，跳过安装"
         fi
     else
         print_error "Android APK 编译失败"
@@ -155,16 +152,12 @@ build_macos() {
     
     flutter build macos --release
     
-    APP_PATH="build/macos/Build/Products/Release/Tetris.app"
-    if [ -d "$APP_PATH" ]; then
-        print_success "macOS 应用编译完成: $APP_PATH"
-        print_info "应用大小: $(du -sh "$APP_PATH" | cut -f1)"
-        
-        read -p "是否打开应用？(y/N): " open_choice
-        if [[ $open_choice =~ ^[Yy]$ ]]; then
+        APP_PATH="build/macos/Build/Products/Release/Tetris.app"
+        if [ -d "$APP_PATH" ]; then
+            print_success "macOS 应用编译完成: $APP_PATH"
+            print_info "应用大小: $(du -sh "$APP_PATH" | cut -f1)"
             open "$APP_PATH"
-        fi
-    else
+        else
         print_error "macOS 应用编译失败"
         exit 1
     fi
@@ -182,17 +175,13 @@ build_linux() {
     
     flutter build linux --release
     
-    APP_PATH="build/linux/x64/release/bundle"
-    if [ -d "$APP_PATH" ]; then
-        print_success "Linux 应用编译完成: $APP_PATH"
-        print_info "应用大小: $(du -sh "$APP_PATH" | cut -f1)"
-        
-        read -p "是否运行应用？(y/N): " run_choice
-        if [[ $run_choice =~ ^[Yy]$ ]]; then
+        APP_PATH="build/linux/x64/release/bundle"
+        if [ -d "$APP_PATH" ]; then
+            print_success "Linux 应用编译完成: $APP_PATH"
+            print_info "应用大小: $(du -sh "$APP_PATH" | cut -f1)"
             cd "$APP_PATH"
             ./tetris
-        fi
-    else
+        else
         print_error "Linux 应用编译失败"
         exit 1
     fi
