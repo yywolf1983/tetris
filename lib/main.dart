@@ -47,6 +47,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   late Tetromino currentPiece;
   late Tetromino nextPiece;
   late int score;
+  int totalLines = 0;
   late int highScore;
   bool gameOver = false;
   bool gameStarted = false;
@@ -170,6 +171,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
       final prefs = await SharedPreferences.getInstance();
       final state = <String, dynamic>{
         'score': score,
+        'totalLines': totalLines,
         'speedLevel': speedLevel,
         'gameSpeed': gameSpeed,
         'board': board.expand((r) => r).toList(),
@@ -196,6 +198,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
       setState(() {
         board = restoredBoard;
         score = m['score'] as int;
+        totalLines = (m['totalLines'] as int?) ?? 0;
         speedLevel = m['speedLevel'] as int;
         gameSpeed = m['gameSpeed'] as double;
         currentPiece = _pieceFromMap(m['current'] as Map<String, dynamic>);
@@ -264,6 +267,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
       currentPiece = Tetromino.random();
       nextPiece = Tetromino.random();
       score = 0;
+      totalLines = 0;
       gameSpeed = 500.0;
       speedLevel = 0;
       gameOver = false;
@@ -537,8 +541,17 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
             }
           }
           
-          // 更新分数
-          score += linesCleared * 100;
+          // 更新分数（传统俄罗斯方块计分：单行/多行不同，并按当前等级放大）
+          final int level = speedLevel + 1;
+          const Map<int, int> lineScores = {
+            1: 100,
+            2: 300,
+            3: 500,
+            4: 800,
+          };
+          final int gained = (lineScores[linesCleared] ?? linesCleared * 200) * level;
+          score += gained;
+          totalLines += linesCleared;
 
           _clearingLines.clear();
 
@@ -1029,6 +1042,36 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
                                 child: FittedBox(
                                   fit: BoxFit.scaleDown,
                                   child: Text('$score', style: const TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(colors: [Color(0xFF66bb6a), Color(0xFF43a047)]),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.linear_scale_rounded, size: 14, color: Colors.white),
+                                    SizedBox(width: 6),
+                                    Text('Lines', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Container(
+                                width: MediaQuery.of(context).size.width >= 600 ? 150 : 120,
+                                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 15),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[900],
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.grey[600]!, width: 1),
+                                ),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text('$totalLines', style: const TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
                                 ),
                               ),
                             ],
