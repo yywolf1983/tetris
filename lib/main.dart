@@ -57,6 +57,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   late AnimationController _flashController;
   late Animation<double> _flashAnimation;
   List<int> _clearingLines = [];
+  bool _isClearing = false;
   late Timer _fastDropTimer;
   late Timer _leftMoveTimer;
   late Timer _rightMoveTimer;
@@ -83,7 +84,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     _isSfxEnabled = true;
     _audioManager = AudioManager();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 300),
       vsync: this,
     );
     _animation = Tween<double>(begin: 1.0, end: 1.15).animate(
@@ -101,7 +102,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     
     // 闪光动画 - 渐变淡出效果
     _flashController = AnimationController(
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 300),
       vsync: this,
     );
     _flashAnimation = Tween<double>(begin: 0.8, end: 0.0).animate(
@@ -306,6 +307,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   }
 
   void hardDrop() {
+    if (_isClearing) return;
     if (gameOver || !gameStarted || gamePaused) return;
     
     // 快速下落到底部
@@ -364,6 +366,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   }
 
   void moveDown() {
+    if (_isClearing) return;
     if (!gameOver && gameStarted && !checkCollision(currentPiece.x, currentPiece.y + 1, currentPiece.shape)) {
       setState(() {
         currentPiece.y++;
@@ -497,6 +500,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
   }
 
   void clearLines() {
+    if (_isClearing) return;
     List<int> linesToClear = [];
     for (int row = rows - 1; row >= 0; row--) {
       bool isLineFull = true;
@@ -513,6 +517,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
     
     if (linesToClear.isNotEmpty) {
       setState(() {
+        _isClearing = true;
         _clearingLines = linesToClear;
       });
       
@@ -522,7 +527,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
       _flashController.forward(from: 0.0);
       
       // 延迟后清除行（与动画时长同步）
-      Future.delayed(const Duration(milliseconds: 600), () {
+      Future.delayed(const Duration(milliseconds: 300), () {
         setState(() {
           int linesCleared = linesToClear.length;
           int startRow = linesToClear.last; // 最上面的消除行
@@ -554,6 +559,7 @@ class _TetrisGameState extends State<TetrisGame> with SingleTickerProviderStateM
           totalLines += linesCleared;
 
           _clearingLines.clear();
+          _isClearing = false;
 
           // 检查是否需要加速
           checkAndUpdateSpeed();
